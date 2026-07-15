@@ -71,9 +71,14 @@ npm run preview  # preview the production build
 
 ## Deployment (Vercel)
 
-The repo is configured for Vercel via `vercel.json` (framework: `vite`, output: `dist`).
-Every push to a connected branch triggers a preview deploy; merges to `main` promote to
-production.
+The repo is connected to **Vercel** and configured via `vercel.json` (framework: `vite`,
+output: `dist`). Deployment is fully automated from Git:
+
+- **Push a branch / open a PR** → Vercel builds a **preview** deployment for that commit.
+- **Merge to `main`** → Vercel promotes a fresh **production** build.
+
+Because deploys are driven by Git, every version bump and change tracked in
+`CHANGELOG.md` ships automatically on merge — no manual upload step.
 
 ## Versioning
 
