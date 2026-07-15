@@ -6,6 +6,36 @@ sync with `package.json`.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.1.0] — "Glass Cockpit" — 2026-07-15
+
+Instruments, navigation and combat-visuals overhaul.
+
+### Added
+- **Glass-cockpit flight instruments** (floating, semi-transparent SVG gauges):
+  - **Airspeed indicator** (dial + needle).
+  - **Attitude indicator** — artificial horizon with a pitch ladder, bank pointer
+    and a slip/skid bubble (the pitch/yaw bubble).
+  - **Altimeter** dial with a digital thousands window.
+  - **Heading indicator / compass** with a rotating rose and digital heading, plus
+    a G-load readout.
+  - **Fuel gauge** with an empty-side red arc and low-fuel warning.
+- **Fuel system**: endurance burns with throttle; a dead engine forces the prop to
+  windmill and the aircraft to glide.
+- **Radar mini-map** (heading-up) plotting enemies, ships and the objective, with
+  distant contacts clamped to the rim as direction arrows, and range-to-objective.
+- **Objective guidance arrow** under the compass that rotates toward the objective
+  with a live distance readout.
+- **Battle map page** (MAP button / `M` key): a north-up, auto-scaled overview of
+  the whole battlefield — player heading, enemy fighters, enemy/friendly ships,
+  islands and the objective — with a legend. Opening it pauses the sortie.
+- **Enhanced weapons visuals**: brighter, longer tracer streaks with additive
+  glowing heads, plus **muzzle flashes** on every burst (player and enemy).
+
+### Changed
+- Replaced the plain numeric six-pack readout with the analog instrument cluster;
+  the remaining text HUD is now a compact status strip (objective, enemies, ammo,
+  bombs, hull, wind, stall/fuel warnings).
+
 ## [1.0.0] — "Rising Sun" — 2026-07-15
 
 Initial playable release.

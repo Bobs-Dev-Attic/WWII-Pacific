@@ -40,7 +40,18 @@ export class Weapons {
   private tracerColors: Float32Array;
   private maxTracers = 400;
 
+  // Glowing tracer heads (additive points) so rounds read clearly against sky/sea.
+  private headGeo = new THREE.BufferGeometry();
+  private headPositions: Float32Array;
+  private headColors: Float32Array;
+  private tracerHeads: THREE.Points;
+  private glowTex: THREE.Texture;
+  // Muzzle-flash pool.
+  private flashes: { mesh: THREE.Mesh; life: number; max: number }[] = [];
+
   constructor(private scene: THREE.Scene) {
+    this.glowTex = makeGlowTexture();
+
     // Tracer line pool (2 verts per bullet segment).
     this.tracerPositions = new Float32Array(this.maxTracers * 2 * 3);
     this.tracerColors = new Float32Array(this.maxTracers * 2 * 3);
@@ -48,10 +59,30 @@ export class Weapons {
     this.tracerGeo.setAttribute('color', new THREE.BufferAttribute(this.tracerColors, 3));
     this.tracerLines = new THREE.LineSegments(
       this.tracerGeo,
-      new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 })
+      new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95 })
     );
     this.tracerLines.frustumCulled = false;
     this.group.add(this.tracerLines);
+
+    // Bright additive heads.
+    this.headPositions = new Float32Array(this.maxTracers * 3);
+    this.headColors = new Float32Array(this.maxTracers * 3);
+    this.headGeo.setAttribute('position', new THREE.BufferAttribute(this.headPositions, 3));
+    this.headGeo.setAttribute('color', new THREE.BufferAttribute(this.headColors, 3));
+    this.tracerHeads = new THREE.Points(
+      this.headGeo,
+      new THREE.PointsMaterial({
+        size: 6,
+        map: this.glowTex,
+        vertexColors: true,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        sizeAttenuation: true,
+      })
+    );
+    this.tracerHeads.frustumCulled = false;
+    this.group.add(this.tracerHeads);
 
     // Bomb instances.
     const bombGeo = new THREE.CapsuleGeometry(0.18, 1.0, 4, 6);
@@ -104,6 +135,23 @@ export class Weapons {
     this.explosions.push({ mesh, life: 0.6, max: size });
   }
 
+  // Bright, brief additive muzzle flash at the gun, tinted per side.
+  spawnMuzzleFlash(pos: THREE.Vector3, dir: THREE.Vector3, fromPlayer: boolean): void {
+    const mat = new THREE.SpriteMaterial({
+      map: this.glowTex,
+      color: fromPlayer ? 0xffe089 : 0xff7a4a,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      opacity: 1,
+    });
+    const spr = new THREE.Sprite(mat);
+    spr.position.copy(pos).addScaledVector(dir, 1.2);
+    spr.scale.setScalar(3);
+    this.scene.add(spr as unknown as THREE.Mesh);
+    this.flashes.push({ mesh: spr as unknown as THREE.Mesh, life: 0.06, max: 3 });
+  }
+
   update(dt: number, wind: THREE.Vector3): void {
     // Bullets: integrate with light gravity + wind push.
     for (let i = this.bullets.length - 1; i >= 0; i--) {
@@ -134,11 +182,11 @@ export class Weapons {
       }
     }
 
-    // Render tracers (each bullet as a short segment along its velocity).
+    // Render tracers: a bright streak (line) plus a glowing head point.
     let ti = 0;
     for (const b of this.bullets) {
       if (ti >= this.maxTracers) break;
-      const tail = b.pos.clone().addScaledVector(b.vel, -0.02);
+      const tail = b.pos.clone().addScaledVector(b.vel, -0.05); // longer streak
       const o = ti * 6;
       this.tracerPositions[o] = tail.x;
       this.tracerPositions[o + 1] = tail.y;
@@ -146,22 +194,47 @@ export class Weapons {
       this.tracerPositions[o + 3] = b.pos.x;
       this.tracerPositions[o + 4] = b.pos.y;
       this.tracerPositions[o + 5] = b.pos.z;
-      const c = b.fromPlayer ? [1.0, 0.88, 0.45] : [1.0, 0.35, 0.2];
+      const c = b.fromPlayer ? [1.0, 0.9, 0.4] : [1.0, 0.4, 0.2];
       for (let k = 0; k < 2; k++) {
         this.tracerColors[o + k * 3] = c[0];
         this.tracerColors[o + k * 3 + 1] = c[1];
         this.tracerColors[o + k * 3 + 2] = c[2];
       }
+      const h = ti * 3;
+      this.headPositions[h] = b.pos.x;
+      this.headPositions[h + 1] = b.pos.y;
+      this.headPositions[h + 2] = b.pos.z;
+      this.headColors[h] = c[0];
+      this.headColors[h + 1] = c[1];
+      this.headColors[h + 2] = c[2];
       ti++;
     }
-    // Zero out unused tracer slots.
+    // Zero out unused slots.
     for (let j = ti; j < this.maxTracers; j++) {
       const o = j * 6;
       for (let k = 0; k < 6; k++) this.tracerPositions[o + k] = 0;
+      const h = j * 3;
+      this.headPositions[h] = this.headPositions[h + 1] = this.headPositions[h + 2] = 0;
     }
     this.tracerGeo.attributes.position.needsUpdate = true;
     this.tracerGeo.attributes.color.needsUpdate = true;
     this.tracerGeo.setDrawRange(0, ti * 2);
+    this.headGeo.attributes.position.needsUpdate = true;
+    this.headGeo.attributes.color.needsUpdate = true;
+    this.headGeo.setDrawRange(0, ti);
+
+    // Muzzle flashes (fast fade + shrink).
+    for (let i = this.flashes.length - 1; i >= 0; i--) {
+      const f = this.flashes[i];
+      f.life -= dt;
+      const k = Math.max(0, f.life / 0.06);
+      f.mesh.scale.setScalar(f.max * (0.5 + k));
+      (f.mesh.material as THREE.SpriteMaterial).opacity = k;
+      if (f.life <= 0) {
+        this.scene.remove(f.mesh);
+        this.flashes.splice(i, 1);
+      }
+    }
 
     // Render bombs.
     for (let i = 0; i < 40; i++) {
@@ -222,4 +295,21 @@ export class Weapons {
 function hash(n: number): number {
   const x = Math.sin(n * 91.7 + 13.1) * 43758.5453;
   return x - Math.floor(x);
+}
+
+// Soft radial glow used for tracer heads and muzzle flashes.
+function makeGlowTexture(): THREE.Texture {
+  const s = 64;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = s;
+  const ctx = cv.getContext('2d')!;
+  const g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.35, 'rgba(255,240,190,0.85)');
+  g.addColorStop(1, 'rgba(255,200,120,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, s, s);
+  const tex = new THREE.Texture(cv);
+  tex.needsUpdate = true;
+  return tex;
 }

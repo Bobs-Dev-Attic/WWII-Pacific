@@ -1,17 +1,15 @@
 import { VERSION_LABEL } from '../version';
 
-// In-flight HUD + on-screen touch controls. Builds its own DOM into the given
-// root and exposes update()/toast()/outcome() for the game loop to drive.
+// In-flight text HUD + on-screen touch controls. The analog gauges, radar and
+// battle map are separate modules mounted by the Game; this handles the compact
+// status readout, crosshair, bomb pipper, objective bearing arrow, toasts and
+// the outcome screen.
 
 export interface HudData {
-  airspeed: number; // m/s
-  altitude: number; // m
-  heading: number; // deg
   throttle: number; // 0..1
-  pitch: number; // deg
-  roll: number; // deg
-  gForce: number;
   stalled: boolean;
+  outOfFuel: boolean;
+  fuelFraction: number;
   ammo: number;
   bombs: number;
   hp: number;
@@ -23,17 +21,14 @@ export interface HudData {
 }
 
 const MS_TO_MPH = 2.23694;
-const M_TO_FT = 3.28084;
 
 export class Hud {
   root: HTMLElement;
-  private tl!: HTMLElement;
-  private tr!: HTMLElement;
-  private bl!: HTMLElement;
   private crosshair!: HTMLElement;
   private pipper!: HTMLElement;
   private toastEl!: HTMLElement;
   private overlay!: HTMLElement;
+  private objArrow!: HTMLElement;
   private toastTimer = 0;
 
   constructor(root: HTMLElement) {
@@ -44,24 +39,31 @@ export class Hud {
   private build(): void {
     this.root.innerHTML = `
       <div id="hud">
-        <div class="hud-tl">
-          <div>SPD <span class="hud-val" id="h-spd">0</span> mph</div>
-          <div>ALT <span class="hud-val" id="h-alt">0</span> ft</div>
-          <div>HDG <span class="hud-val" id="h-hdg">000</span>&deg;</div>
-          <div>G <span class="hud-val" id="h-g">1.0</span></div>
+        <div class="hud-status">
+          <div class="hud-obj" id="h-obj">&mdash;</div>
+          <div class="hud-row">
+            <span>ENEMY <b id="h-enemy">0</b></span>
+            <span>AMMO <b id="h-ammo">0</b></span>
+            <span>BOMBS <b id="h-bomb">0</b></span>
+          </div>
+          <div class="hud-row">
+            <span id="h-hull">HULL <b id="h-hp">100</b>%</span>
+            <span>WIND <b id="h-wind">0</b></span>
+          </div>
+          <div id="h-stall" class="warn hidden">▲ STALL</div>
+          <div id="h-fuelwarn" class="warn hidden">⚠ FUEL</div>
         </div>
-        <div class="hud-tr">
-          <div id="h-obj">&mdash;</div>
-          <div>ENEMY <span class="hud-val" id="h-enemy">0</span></div>
-          <div>AMMO <span class="hud-val" id="h-ammo">0</span></div>
-          <div>BOMBS <span class="hud-val" id="h-bomb">0</span></div>
-          <div>WIND <span class="hud-val" id="h-wind">0</span></div>
-        </div>
-        <div class="hud-bl">
-          <div>THR <span class="hud-val" id="h-thr">70</span>%</div>
-          <div id="h-hull">HULL <span class="hud-val" id="h-hp">100</span>%</div>
-          <div id="h-stall" class="warn hidden">STALL</div>
-        </div>
+      </div>
+
+      <button class="hud-btn" id="btn-map">MAP</button>
+
+      <div id="obj-arrow">
+        <svg viewBox="0 0 40 48" width="40" height="48">
+          <g id="obj-arrow-rot">
+            <polygon points="20,2 30,18 22,18 22,30 18,30 18,18 10,18" fill="#e3b23c"/>
+          </g>
+        </svg>
+        <div class="obj-dist" id="obj-dist"></div>
       </div>
 
       <svg id="crosshair" viewBox="0 0 46 46">
@@ -91,10 +93,10 @@ export class Hud {
         <button class="abtn" id="btn-yaw-l" style="width:56px;height:56px;background:rgba(28,58,79,0.55);">&#8634;</button>
         <button class="abtn" id="btn-yaw-r" style="width:56px;height:56px;background:rgba(28,58,79,0.55);">&#8635;</button>
       </div>
-      <button class="abtn touch-only" id="btn-view" style="position:fixed;right:calc(20px + var(--safe-r));top:calc(96px + var(--safe-t));width:52px;height:52px;background:rgba(28,58,79,0.55);z-index:6;">VIEW</button>
+      <button class="abtn touch-only" id="btn-view" style="position:fixed;right:calc(20px + var(--safe-r));top:calc(206px + var(--safe-t));width:52px;height:52px;background:rgba(28,58,79,0.55);z-index:6;">VIEW</button>
 
       <div class="toast" id="toast"></div>
-      <div class="hint kbd">W/S pitch &middot; A/D roll &middot; Q/E rudder &middot; Shift/Ctrl throttle &middot; Space fire &middot; B bomb &middot; V view</div>
+      <div class="hint kbd">W/S pitch · A/D roll · Q/E rudder · Shift/Ctrl throttle · Space fire · B bomb · V view · M map</div>
 
       <div id="overlay-msg" class="hidden">
         <h2 id="ov-title"></h2>
@@ -106,13 +108,11 @@ export class Hud {
         <div style="margin-top:20px;font-size:11px;color:var(--ink-dim);">${VERSION_LABEL}</div>
       </div>
     `;
-    this.tl = document.getElementById('h-spd')!.parentElement!.parentElement!;
-    this.tr = document.getElementById('h-obj')!.parentElement!;
-    this.bl = document.getElementById('h-thr')!.parentElement!;
     this.crosshair = document.getElementById('crosshair')!;
     this.pipper = document.getElementById('pipper')!;
     this.toastEl = document.getElementById('toast')!;
     this.overlay = document.getElementById('overlay-msg')!;
+    this.objArrow = document.getElementById('obj-arrow')!;
   }
 
   private set(id: string, v: string): void {
@@ -121,11 +121,6 @@ export class Hud {
   }
 
   update(d: HudData): void {
-    this.set('h-spd', Math.round(d.airspeed * MS_TO_MPH).toString());
-    this.set('h-alt', Math.round(d.altitude * M_TO_FT).toLocaleString());
-    this.set('h-hdg', Math.round(d.heading).toString().padStart(3, '0'));
-    this.set('h-g', d.gForce.toFixed(1));
-    this.set('h-thr', Math.round(d.throttle * 100).toString());
     this.set('h-ammo', d.ammo.toString());
     this.set('h-bomb', d.bombs.toString());
     this.set('h-enemy', d.enemiesLeft.toString());
@@ -133,12 +128,21 @@ export class Hud {
     this.set('h-wind', `${Math.round(d.windSpeed * MS_TO_MPH)}mph @${Math.round(d.windDir)}°`);
     const hpPct = Math.round((d.hp / d.maxHp) * 100);
     this.set('h-hp', hpPct.toString());
-    const hull = document.getElementById('h-hull')!;
-    hull.className = hpPct < 30 ? 'warn' : '';
-    const stall = document.getElementById('h-stall')!;
-    stall.classList.toggle('hidden', !d.stalled);
-    const gEl = document.getElementById('h-g')!;
-    gEl.className = Math.abs(d.gForce) > 6 ? 'hud-val warn' : 'hud-val';
+    document.getElementById('h-hull')!.className = hpPct < 30 ? 'warn' : '';
+    document.getElementById('h-stall')!.classList.toggle('hidden', !d.stalled);
+    document.getElementById('h-fuelwarn')!.classList.toggle('hidden', !(d.outOfFuel || d.fuelFraction < 0.12));
+  }
+
+  // Objective bearing arrow (relative to the nose). angleRad: 0 = dead ahead.
+  setObjectiveArrow(angleRad: number | null, distanceKm: number): void {
+    if (angleRad === null) {
+      this.objArrow.style.display = 'none';
+      return;
+    }
+    this.objArrow.style.display = '';
+    const rot = document.getElementById('obj-arrow-rot')!;
+    rot.setAttribute('transform', `rotate(${(angleRad * 180) / Math.PI} 20 24)`);
+    this.set('obj-dist', `${distanceKm.toFixed(1)} km`);
   }
 
   setPipper(x: number | null, y: number): void {
@@ -162,6 +166,10 @@ export class Hud {
       this.toastTimer -= dt;
       if (this.toastTimer <= 0) this.toastEl.classList.remove('show');
     }
+  }
+
+  onMap(cb: () => void): void {
+    document.getElementById('btn-map')!.addEventListener('click', cb);
   }
 
   outcome(title: string, text: string, win: boolean): void {

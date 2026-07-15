@@ -310,6 +310,7 @@ export class Squadron {
     if (fwd.dot(dirToAim) < 0.99) return;
     const muzzle = e.pos.clone().addScaledVector(fwd, 4);
     this.weapons.fireGun(muzzle, dirToAim, e.vel, e.spec.side, e.spec.gunDamage, false);
+    this.weapons.spawnMuzzleFlash(muzzle, fwd, false);
     e.cooldown = 1 / (e.spec.fireRate / 6) + hash(e.formSlot + this.time) * 0.1;
   }
 

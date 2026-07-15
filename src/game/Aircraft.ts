@@ -16,6 +16,9 @@ export class Aircraft {
   ammo: number;
   bombs: number;
   alive = true;
+  // Fuel is measured in seconds of endurance; burn scales with throttle.
+  fuel: number;
+  fuelCapacity = 600; // ~10 min at cruise
   private gunTimer = 0;
   private propSpin = 0;
 
@@ -27,6 +30,14 @@ export class Aircraft {
     this.maxHp = spec.hp;
     this.ammo = spec.ammo;
     this.bombs = spec.bombs;
+    this.fuel = this.fuelCapacity;
+  }
+
+  get fuelFraction(): number {
+    return THREE.MathUtils.clamp(this.fuel / this.fuelCapacity, 0, 1);
+  }
+  get outOfFuel(): boolean {
+    return this.fuel <= 0;
   }
 
   addToScene(scene: THREE.Scene): void {
@@ -40,6 +51,7 @@ export class Aircraft {
     this.hp = this.maxHp;
     this.ammo = this.spec.ammo;
     this.bombs = this.spec.bombs;
+    this.fuel = this.fuelCapacity;
     this.alive = true;
   }
 
@@ -65,10 +77,18 @@ export class Aircraft {
   update(dt: number, controls: ControlInput, env: Environment): void {
     if (this.gunTimer > 0) this.gunTimer -= dt;
 
-    // Cut engine authority / controls when destroyed (falls).
-    const c: ControlInput = this.alive
-      ? controls
-      : { pitch: -0.2, roll: 0.4, yaw: 0.1, throttle: 0 };
+    // Burn fuel: idle draw + throttle-proportional draw. A dead engine coasts.
+    if (this.alive && this.fuel > 0) {
+      this.fuel = Math.max(0, this.fuel - dt * (0.35 + 0.65 * controls.throttle));
+    }
+    const engineOut = this.outOfFuel;
+
+    // Cut engine authority / controls when destroyed (falls) or out of fuel.
+    const c: ControlInput = !this.alive
+      ? { pitch: -0.2, roll: 0.4, yaw: 0.1, throttle: 0 }
+      : engineOut
+        ? { ...controls, throttle: 0 }
+        : controls;
 
     this.model.update(dt, c, env);
 

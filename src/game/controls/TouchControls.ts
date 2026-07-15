@@ -121,6 +121,12 @@ export class TouchControls {
       e.preventDefault();
       this.state.viewToggle = true;
     });
+
+    // Map page toggle.
+    this.el('btn-map').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.state.mapToggle = true;
+    });
   }
 
   update(): void {

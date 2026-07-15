@@ -521,3 +521,257 @@ body.is-touch .touch-only {
 body.is-touch .hint.kbd {
   display: none;
 }
+
+/* ============================================================
+   v1.1 — Glass-cockpit instruments, radar, battle map, arrows
+   ============================================================ */
+
+/* Compact status readout (top-left) */
+.hud-status {
+  position: fixed;
+  top: calc(10px + var(--safe-t));
+  left: calc(10px + var(--safe-l));
+  z-index: 5;
+  padding: 8px 11px;
+  background: rgba(4, 16, 26, 0.42);
+  border: 1px solid rgba(76, 175, 125, 0.35);
+  border-radius: 10px;
+  color: #8bf0b0;
+  font-family: 'Consolas', 'Menlo', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+.hud-obj {
+  color: var(--gold);
+  font-weight: bold;
+  letter-spacing: 1px;
+  margin-bottom: 3px;
+}
+.hud-row {
+  display: flex;
+  gap: 12px;
+}
+.hud-row b {
+  color: #eafff2;
+}
+
+/* MAP button (always visible, clickable) */
+.hud-btn {
+  position: fixed;
+  top: calc(150px + var(--safe-t));
+  right: calc(10px + var(--safe-r));
+  z-index: 7;
+  padding: 8px 16px;
+  border-radius: 9px;
+  border: 1px solid var(--gold-dim);
+  background: rgba(4, 16, 26, 0.6);
+  color: var(--gold);
+  font-family: 'Consolas', monospace;
+  font-size: 13px;
+  letter-spacing: 2px;
+  font-weight: bold;
+  cursor: pointer;
+  backdrop-filter: blur(2px);
+}
+.hud-btn:active {
+  transform: translateY(1px);
+}
+
+/* Instruments container + gauges */
+#instruments {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+.gauge {
+  position: fixed;
+  opacity: 0.92;
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.4));
+}
+.gauge .dial {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.gauge-lbl {
+  text-align: center;
+  font-family: 'Consolas', monospace;
+  font-size: 8px;
+  letter-spacing: 1px;
+  color: rgba(139, 240, 176, 0.75);
+  margin-top: 1px;
+}
+.gauge.compass {
+  top: calc(6px + var(--safe-t));
+  left: 50%;
+  transform: translateX(-50%);
+  width: 78px;
+}
+.gauge.ai {
+  bottom: calc(6px + var(--safe-b));
+  left: 50%;
+  transform: translateX(-50%);
+  width: 90px;
+}
+.gauge.asi {
+  bottom: calc(10px + var(--safe-b));
+  left: calc(50% - 142px);
+  width: 74px;
+}
+.gauge.alt {
+  bottom: calc(10px + var(--safe-b));
+  left: calc(50% + 68px);
+  width: 74px;
+}
+.gauge.fuel {
+  top: calc(118px + var(--safe-t));
+  left: calc(12px + var(--safe-l));
+  width: 66px;
+}
+.gauge.fuel.low {
+  animation: blink 0.8s steps(2, start) infinite;
+}
+
+/* SVG instrument primitives */
+.in-bezel { fill: #10222e; stroke: #33505f; stroke-width: 2; }
+.in-face { fill: rgba(6, 18, 26, 0.72); }
+.in-tick { stroke: #8bf0b0; stroke-width: 1.6; opacity: 0.85; }
+.in-tick-sm { stroke: #6fbf92; stroke-width: 0.8; opacity: 0.5; }
+.in-num { fill: #d7f6e5; font: 8px 'Consolas', monospace; text-anchor: middle; }
+.in-cap { fill: rgba(139, 240, 176, 0.7); font: 6px 'Consolas', monospace; text-anchor: middle; }
+.in-cap-g { fill: #eafff2; font: 8px 'Consolas', monospace; text-anchor: middle; }
+.in-cap-g.warnG { fill: #ff6a4a; }
+.in-needle { stroke: #ffe089; stroke-width: 2.4; stroke-linecap: round; }
+.in-hub { fill: #ffd166; stroke: #7a5a10; stroke-width: 0.6; }
+.in-window { fill: #05131c; stroke: #33505f; stroke-width: 0.6; }
+.in-digi { fill: #eafff2; font: bold 9px 'Consolas', monospace; text-anchor: middle; }
+.in-card { fill: #eafff2; font: bold 9px 'Consolas', monospace; text-anchor: middle; }
+.in-north { fill: #ff6a4a; }
+.in-lubber { fill: #ffd166; }
+
+/* Attitude indicator */
+.ai-sky { fill: #3f7fb5; }
+.ai-ground { fill: #7a5230; }
+.ai-horizon { stroke: #eafff2; stroke-width: 1.4; }
+.in-ladder { stroke: #eafff2; stroke-width: 1; opacity: 0.85; }
+.in-ladder-num { fill: #eafff2; font: 5px 'Consolas', monospace; }
+.ai-wing { stroke: #ffd166; stroke-width: 2.4; fill: #ffd166; stroke-linecap: round; }
+.ai-bankptr { fill: #ffd166; }
+.ai-bankptr-fixed { fill: #eafff2; }
+.in-tube { fill: #05131c; stroke: #33505f; stroke-width: 0.6; }
+.in-ball { fill: #eafff2; }
+.fuel-red { stroke: #e6533c; stroke-width: 3; fill: none; }
+
+/* Objective bearing arrow (under compass) */
+#obj-arrow {
+  position: fixed;
+  top: calc(92px + var(--safe-t));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  text-align: center;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+}
+.obj-dist {
+  font-family: 'Consolas', monospace;
+  font-size: 11px;
+  color: var(--gold);
+  margin-top: -4px;
+  letter-spacing: 1px;
+}
+
+/* Radar mini-map (top-right) */
+#minimap {
+  position: fixed;
+  top: calc(8px + var(--safe-t));
+  right: calc(8px + var(--safe-r));
+  z-index: 5;
+  width: 130px;
+  pointer-events: none;
+}
+#minimap canvas {
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  border: 1px solid rgba(139, 240, 176, 0.35);
+}
+.mm-dist {
+  text-align: center;
+  font-family: 'Consolas', monospace;
+  font-size: 10px;
+  color: var(--gold);
+  margin-top: 2px;
+}
+
+/* Battle map page */
+#battlemap {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(14px + var(--safe-t)) 14px calc(14px + var(--safe-b));
+  background: rgba(3, 10, 16, 0.9);
+}
+.map-panel {
+  width: min(920px, 100%);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.map-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.map-title {
+  font-size: 18px;
+  letter-spacing: 1px;
+  color: var(--ink);
+}
+.map-obj {
+  font-size: 12px;
+  color: var(--gold);
+  letter-spacing: 1px;
+}
+#map-canvas {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border-radius: 12px;
+  border: 1px solid rgba(139, 240, 176, 0.25);
+  background: #123a56;
+}
+.map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.map-legend span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.map-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+/* Tighten instruments on small screens */
+@media (max-width: 700px) {
+  .gauge.ai { width: 78px; }
+  .gauge.asi { width: 64px; left: calc(50% - 120px); }
+  .gauge.alt { width: 64px; left: calc(50% + 58px); }
+  .gauge.compass { width: 66px; }
+}

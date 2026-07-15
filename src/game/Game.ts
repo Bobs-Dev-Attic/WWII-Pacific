@@ -8,6 +8,9 @@ import { Weapons } from './Weapons';
 import { Aircraft } from './Aircraft';
 import { Squadron, type PlayerRef } from './EnemyAI';
 import { Hud, type HudData } from '../ui/hud';
+import { Instruments, type InstrumentData } from '../ui/instruments';
+import { Minimap, type Blip } from '../ui/minimap';
+import { BattleMap, type MapBlip } from '../ui/battlemap';
 import { createInputState, type InputState } from './controls/InputState';
 import { TouchControls } from './controls/TouchControls';
 import { KeyboardControls } from './controls/KeyboardControls';
@@ -32,6 +35,9 @@ export class Game {
   private player: Aircraft;
   private squadron: Squadron;
   private hud: Hud;
+  private instruments: Instruments;
+  private minimap: Minimap;
+  private battlemap: BattleMap;
   private input: InputState;
   private touch?: TouchControls;
   private keyboard: KeyboardControls;
@@ -39,10 +45,12 @@ export class Game {
   private clock = new THREE.Clock();
   private raf = 0;
   private running = false;
+  private paused = false;
   private cockpitView = false;
   private outcomeShown = false;
   private elapsed = 0;
   private hudAccum = 0;
+  private objectivePos: THREE.Vector3 | null = null;
 
   private camPos = new THREE.Vector3();
   private tmp = new THREE.Vector3();
@@ -78,6 +86,14 @@ export class Game {
     this.hud = new Hud(hudRoot);
     this.hud.onRetry(() => this.restart());
     this.hud.onMenu(() => this.exit());
+
+    // Glass-cockpit gauges, radar mini-map, and full battle map.
+    this.instruments = new Instruments(hudRoot);
+    this.minimap = new Minimap(hudRoot);
+    this.battlemap = new BattleMap(hudRoot, () => {
+      this.paused = false;
+    });
+    this.hud.onMap(() => this.toggleMap());
 
     this.input = createInputState();
     this.keyboard = new KeyboardControls(this.input);
@@ -129,15 +145,25 @@ export class Game {
   };
 
   private update(dt: number): void {
-    this.elapsed += dt;
-
-    // Inputs.
+    // Inputs (still processed while paused so the map can be closed).
     this.keyboard.update(dt);
     this.touch?.update();
+    if (this.input.mapToggle) {
+      this.input.mapToggle = false;
+      this.toggleMap();
+    }
     if (this.input.viewToggle) {
       this.cockpitView = !this.cockpitView;
       this.input.viewToggle = false;
     }
+
+    // While the battle map is open the sortie is frozen; keep the map live.
+    if (this.paused) {
+      this.battlemap.draw(this.buildMapData());
+      return;
+    }
+
+    this.elapsed += dt;
 
     // Weather + world.
     this.weather.update(dt);
@@ -177,7 +203,13 @@ export class Game {
     // Camera.
     this.updateCamera(dt);
 
-    // HUD (throttle refresh a few times/sec for perf).
+    // Objective tracking (for arrow + radar + map).
+    this.objectivePos = this.computeObjective();
+
+    // Instruments + radar refresh every frame; text HUD a few times/sec.
+    this.updateInstruments();
+    this.updateMinimap();
+    this.updateObjectiveArrow();
     this.hudAccum += dt;
     if (this.hudAccum > 0.08) {
       this.updateHud();
@@ -200,6 +232,7 @@ export class Game {
       const offset = (i - (spread - 1) / 2) * 2.2;
       const origin = nose.clone().addScaledVector(right, offset);
       this.weapons.fireGun(origin, fwd, this.player.velocity, spec.side, spec.gunDamage, true);
+      this.weapons.spawnMuzzleFlash(origin, fwd, true);
     }
     this.player.registerShot(spec.guns);
   }
@@ -344,16 +377,11 @@ export class Game {
   }
 
   private updateHud(): void {
-    const m = this.player.model;
     const data: HudData = {
-      airspeed: m.airspeed,
-      altitude: m.altitude,
-      heading: m.headingDeg,
       throttle: this.input.throttle,
-      pitch: m.pitchDeg,
-      roll: m.rollDeg,
-      gForce: m.gForce,
-      stalled: m.stalled,
+      stalled: this.player.model.stalled,
+      outOfFuel: this.player.outOfFuel,
+      fuelFraction: this.player.fuelFraction,
       ammo: this.player.ammo,
       bombs: this.player.bombs,
       hp: this.player.hp,
@@ -364,6 +392,133 @@ export class Game {
       windSpeed: this.weather.windSpeed,
     };
     this.hud.update(data);
+  }
+
+  private updateInstruments(): void {
+    const m = this.player.model;
+    // Slip/skid: lateral component of airflow in the body frame.
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(m.quaternion);
+    const airVel = this.player.velocity.clone().sub(this.weather.env.wind);
+    const slip = THREE.MathUtils.clamp((airVel.dot(right) / Math.max(20, airVel.length())) * 4, -1, 1);
+    const d: InstrumentData = {
+      airspeedMph: m.airspeed * 2.23694,
+      maxSpeedMph: this.player.spec.maxSpeed * 2.23694 * 1.15,
+      altitudeFt: Math.max(0, m.altitude * 3.28084),
+      headingDeg: m.headingDeg,
+      pitchDeg: m.pitchDeg,
+      rollDeg: m.rollDeg,
+      slip,
+      fuelFraction: this.player.fuelFraction,
+      gForce: m.gForce,
+      stalled: m.stalled,
+    };
+    this.instruments.update(d);
+  }
+
+  private updateMinimap(): void {
+    const blips: Blip[] = [];
+    for (const e of this.squadron.enemyList()) {
+      if (e.alive) blips.push({ x: e.pos.x, z: e.pos.z, kind: 'enemy' });
+    }
+    for (const s of this.world.ships) {
+      if (!s.alive) continue;
+      blips.push({ x: s.group.position.x, z: s.group.position.z, kind: s.side === this.cfg.side ? 'friendly' : 'target' });
+    }
+    this.minimap.update({
+      px: this.player.position.x,
+      pz: this.player.position.z,
+      headingRad: (this.player.model.headingDeg * Math.PI) / 180,
+      blips,
+      objective: this.objectivePos ? { x: this.objectivePos.x, z: this.objectivePos.z } : null,
+    });
+  }
+
+  private updateObjectiveArrow(): void {
+    if (!this.objectivePos) {
+      this.hud.setObjectiveArrow(null, 0);
+      return;
+    }
+    const to = this.objectivePos.clone().sub(this.player.position);
+    const dist = to.length();
+    // Relative bearing: 0 = dead ahead, +right.
+    const heading = (this.player.model.headingDeg * Math.PI) / 180;
+    const bearing = Math.atan2(to.x, to.z);
+    let rel = bearing - heading;
+    while (rel > Math.PI) rel -= Math.PI * 2;
+    while (rel < -Math.PI) rel += Math.PI * 2;
+    this.hud.setObjectiveArrow(rel, dist / 1000);
+  }
+
+  // The world point the player should head toward for the current objective.
+  private computeObjective(): THREE.Vector3 | null {
+    const side = this.cfg.side;
+    const battleObj = this.cfg.battle.objective;
+    if (battleObj === 'strike-ships') {
+      return this.centroid(this.world.aliveShips(side === 'usa' ? 'japan' : 'usa').map((s) => s.group.position));
+    }
+    if (battleObj === 'defend-fleet') {
+      // Guide toward the nearest attacker threatening the fleet.
+      return this.nearestEnemyPos() ?? this.centroid(this.world.aliveShips(side).map((s) => s.group.position));
+    }
+    return this.nearestEnemyPos();
+  }
+
+  private nearestEnemyPos(): THREE.Vector3 | null {
+    let best: THREE.Vector3 | null = null;
+    let bd = Infinity;
+    for (const e of this.squadron.enemyList()) {
+      if (!e.alive) continue;
+      const d = e.pos.distanceToSquared(this.player.position);
+      if (d < bd) {
+        bd = d;
+        best = e.pos;
+      }
+    }
+    return best ? best.clone() : null;
+  }
+
+  private centroid(points: THREE.Vector3[]): THREE.Vector3 | null {
+    if (points.length === 0) return null;
+    const c = new THREE.Vector3();
+    for (const p of points) c.add(p);
+    return c.multiplyScalar(1 / points.length);
+  }
+
+  private toggleMap(): void {
+    if (this.battlemap.isOpen()) {
+      this.battlemap.close();
+    } else {
+      this.paused = true;
+      this.battlemap.show(this.buildMapData());
+    }
+  }
+
+  private buildMapData() {
+    const blips: MapBlip[] = [];
+    for (const e of this.squadron.enemyList()) {
+      if (e.alive) blips.push({ x: e.pos.x, z: e.pos.z, kind: 'enemy' });
+    }
+    for (const s of this.world.ships) {
+      if (!s.alive) continue;
+      blips.push({
+        x: s.group.position.x,
+        z: s.group.position.z,
+        kind: s.side === this.cfg.side ? 'friendly' : 'target',
+        headingRad: s.group.rotation.y,
+      });
+    }
+    return {
+      player: {
+        x: this.player.position.x,
+        z: this.player.position.z,
+        headingRad: (this.player.model.headingDeg * Math.PI) / 180,
+      },
+      blips,
+      islands: this.world.islands,
+      objective: this.objectivePos ? { x: this.objectivePos.x, z: this.objectivePos.z } : null,
+      title: `${this.cfg.battle.name} — ${this.cfg.battle.location}`,
+      objectiveText: this.objectiveText(),
+    };
   }
 
   private evaluateOutcome(): void {
@@ -423,6 +578,9 @@ export class Game {
     this.running = false;
     cancelAnimationFrame(this.raf);
     window.removeEventListener('resize', this.onResize);
+    this.instruments.destroy();
+    this.minimap.destroy();
+    this.battlemap.destroy();
     this.hud.destroy();
     this.renderer.dispose();
     this.renderer.domElement.remove();

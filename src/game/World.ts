@@ -37,6 +37,7 @@ export class World {
   sun: THREE.DirectionalLight;
   ambient: THREE.AmbientLight;
   ships: Ship[] = [];
+  islands: { x: number; z: number; r: number }[] = [];
 
   private ocean: THREE.Mesh;
   private oceanBase: Float32Array;
@@ -152,8 +153,11 @@ export class World {
       }
       const ang = rand(i * 19) * Math.PI * 2;
       const dist = 1200 + rand(i * 23) * 2600;
-      island.position.set(Math.cos(ang) * dist, 0, Math.sin(ang) * dist);
+      const ix = Math.cos(ang) * dist;
+      const iz = Math.sin(ang) * dist;
+      island.position.set(ix, 0, iz);
       this.scene.add(island);
+      this.islands.push({ x: ix, z: iz, r: 190 + rand(i) * 140 });
     }
   }
 

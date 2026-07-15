@@ -14,6 +14,7 @@ export class KeyboardControls {
       if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) e.preventDefault();
       if (k === 'b') this.state.dropBomb = true;
       if (k === 'v') this.state.viewToggle = true;
+      if (k === 'm') this.state.mapToggle = true;
       this.keys.add(k);
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
